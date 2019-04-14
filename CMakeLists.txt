@@ -12,3 +12,5 @@ list(SORT YLOG_SRC)
 add_library(ylog STATIC ${YLOG_SRC})
 
 target_include_directories(ylog PUBLIC ${CUR_DIR})
+target_link_libraries(ylog fmt)
+

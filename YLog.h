@@ -1,21 +1,59 @@
-// (c) 2018 Vladimir Zvezda
-// Interface for logging  
+//     
+//   \|/ YLog
+//   /|\ 2018.07.28 Vladimir Zvezda
+//
+//  The interface class for logging
 #pragma once
-#include <cstdarg>
+#include "fmt/format.h"
 
 namespace ylog {
 
 //-------------------------------------------------------------------------------------------------
 //
 //-------------------------------------------------------------------------------------------------
-class YLog
+struct Sink
 {
-public:
+   // Submits the log record to the log destination
+   virtual void Write(const char* formattedString, const void* source = nullptr) noexcept = 0;
+};
+
+//-------------------------------------------------------------------------------------------------
+//
+//-------------------------------------------------------------------------------------------------
+struct FmtLog: public Sink
+{
+   // Max size of the log record. App can issue several log records if it has to provide a really
+   // long one.
    enum { kMaxRecordSize = 300 };
 
-   virtual void Fmt(const char* fmt, ...) = 0;
-   virtual void FmtI(void* instance, const char* fmt, ...) = 0;
-   virtual void FmtV(const char* fmt, va_list args, const void* instance = nullptr) = 0;
+   // Write log record using fmt library
+   template <typename ...Args>
+   void Fmt(const char* fmtSyntax, Args... args) noexcept 
+   {
+      FmtS(nullptr, fmtSyntax, std::forward<Args>(args)...);
+   }
+
+   // Write log record using fmt library
+   template <typename ...Args>
+   void FmtS(const void* source, const char* fmtSyntax, Args... args) noexcept
+   {
+      try
+      {
+         char buffer[kMaxRecordSize + 1];
+
+         auto res = fmt::format_to_n(buffer, 
+            kMaxRecordSize, 
+            fmtSyntax, 
+            std::forward<Args>(args)...);
+
+         *res.out = 0;
+         Write(buffer, source);
+      }
+      catch (...)
+      {
+         Write("YLog: failed to format log message", source);
+      }
+   }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -23,53 +61,49 @@ public:
 //-------------------------------------------------------------------------------------------------
 class Defaults final
 {
-   // YLog that writes no nowhere
-   class NowhereLogImpl: public YLog
+   // YLog that writes to nowhere, used when 
+   class NowhereLogImpl final: public FmtLog
    {
-   public:
-      virtual void Fmt(const char* fmt, ...) override final   {}
-      virtual void FmtI(void* instance, const char* fmt, ...) override final {}
-      virtual void FmtV(const char* fmt, va_list args, const void* instance) override final  {}
+   protected:
+      void Write(const char* formattedString, const void* source) noexcept final {}
    };
 public:
-   static YLog* NowhereLog() noexcept
+   static FmtLog* Nowhere() noexcept
    {
       static NowhereLogImpl s_nowhereLog;
       return &s_nowhereLog;
    }
 
-   static YLog* StdoutLog() noexcept;
+   static FmtLog* Stdout() noexcept;
 };
 
 //-------------------------------------------------------------------------------------------------
 //
 //-------------------------------------------------------------------------------------------------
-template <class Owner>
+enum class TraceMode { On, Off };
+
+//-------------------------------------------------------------------------------------------------
+//
+//-------------------------------------------------------------------------------------------------
+template <class Owner, TraceMode TraceModeP = TraceMode::Off>
 class Loggable
 {
 public:
-   Loggable(YLog* pLog = nullptr) noexcept
-      : m_pLog(pLog == nullptr ? Defaults::NowhereLog() : pLog)
+   Loggable(FmtLog* pLog = nullptr) noexcept
+      : m_pLog(pLog == nullptr ? Defaults::Nowhere() : pLog)
    {}
 
-   void SetLogger(YLog* pLog)  {  m_pLog = pLog;  }
-   YLog* GetLogger() { return m_pLog;  }
+   void SetLogger(FmtLog* pLog)  noexcept {  m_pLog = pLog; }
+   FmtLog* GetLogger() noexcept { return m_pLog;  }
 
-   void Log(const char* fmt, ...)
+   template <typename ...Args>
+   void Log(const char* fmtSyntax, Args... args)
    {
-      va_list list;
-      va_start(list, fmt);
-      m_pLog->FmtV(fmt, list, static_cast<const Owner*>(this));
-      va_end(list);
+      m_pLog->FmtS(static_cast<const Owner*>(this), fmtSyntax, std::forward<Args>(args)...);
    };
 
-   void LogV(const char* fmt, va_list args)
-   {
-      m_pLog->FmtV(fmt, args, static_cast<const Owner*>(this));
-   }
-
 private:
-   YLog* m_pLog;
+   FmtLog* m_pLog;
 };
 
 }
